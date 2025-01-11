@@ -5,6 +5,7 @@ FFXI Server Emulator Boot Loader -- Launches client without PlayOnline.
 ## XiPivot support
 Includes XIPivot support, for those pesky DATs the Windower addon cannot handle such as the Spells DAT.
 
+
 Limitations:
 - The overlays are loaded from a folder named `overlays` in the same directory as the bootloader executable.
 - Overlays are loaded in the order they are found in the folder. Use numeric prefixes to control the order. Example: `01_ffxihd`, `02_ffximaps`, etc.
