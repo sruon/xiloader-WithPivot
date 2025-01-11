@@ -30,8 +30,9 @@ This file is part of DarkStar-server source code.
 #include "console.h"
 #include "functions.h"
 #include "network.h"
-
+#include <filesystem>
 #include "argparse/argparse.hpp"
+#include "XIPivot/Redirector.h"
 
 /* Global Variables */
 namespace globals
@@ -316,6 +317,17 @@ std::unique_ptr<mbedtls_x509_crt> extract_cert(PCCERT_CONTEXT certificateContext
     return std::move(certificate);
 }
 
+std::string getModulePath()
+{
+    char  buffer[MAX_PATH];
+    DWORD length = GetModuleFileNameA(NULL, buffer, MAX_PATH);
+    if (length == 0)
+    {
+        throw std::runtime_error("Failed to get module path");
+    }
+    return std::filesystem::path(buffer).parent_path().string();
+}
+
 // Source: https://curl.se/mail/lib-2019-06/0057.html
 std::unique_ptr<mbedtls_x509_crt> build_windows_ca_chain()
 {
@@ -359,6 +371,40 @@ std::unique_ptr<mbedtls_x509_crt> build_windows_ca_chain()
 
     return ca_chain;
 }
+
+class XIPivotLogger : public XiPivot::Core::IDelegate
+{
+private:
+    std::map<XiPivot::Core::IDelegate::LogLevel, xiloader::color> logLevelColorMap = {
+        { XiPivot::Core::IDelegate::LogLevel::Discard, xiloader::color::debug },
+        { XiPivot::Core::IDelegate::LogLevel::Debug, xiloader::color::debug },
+        { XiPivot::Core::IDelegate::LogLevel::Info, xiloader::color::info },
+        { XiPivot::Core::IDelegate::LogLevel::Warn, xiloader::color::warning },
+        { XiPivot::Core::IDelegate::LogLevel::Error, xiloader::color::error },
+    };
+
+public:
+    void logMessage(LogLevel level, std::string message) override
+    {
+        if (level == LogLevel::Discard)
+        {
+            return;
+        }
+        message = "[XIPivot] " + message;
+        xiloader::console::output(logLevelColorMap[level], message.c_str());
+    }
+
+    void logMessageF(LogLevel level, std::string fmt, ...) override
+    {
+        va_list args;
+        va_start(args, fmt);
+        char buffer[1024];
+        vsnprintf(buffer, sizeof(buffer), fmt.c_str(), args);
+        va_end(args);
+
+        logMessage(level, buffer);
+    }
+};
 
 /**
  * @brief Main program entrypoint.
@@ -504,6 +550,35 @@ int __cdecl main(int argc, char* argv[])
         xiloader::console::output(xiloader::color::error, "Failed to initialize COM, error code: %d", hResult);
         return 1;
     }
+
+    const std::string pivotsRootPath = getModulePath() + "\\overlays";
+    auto&             redirector     = XiPivot::Core::Redirector::instance();
+    if (!std::filesystem::exists(pivotsRootPath) || !std::filesystem::is_directory(pivotsRootPath))
+    {
+        xiloader::console::output(xiloader::color::warning, "Overlays folder %s not found. Skipping XIPivot setup.", pivotsRootPath);
+    }
+    else
+    {
+        redirector.setDebugLog(false);
+        redirector.setLogProvider(new XIPivotLogger());
+        if (!redirector.setupHooks())
+        {
+            xiloader::console::output(xiloader::color::error, "Failed to setup XIPivot hooks. Will continue without overlays.");
+        }
+        else
+        {
+            redirector.setRootPath(pivotsRootPath);
+            std::vector<std::string> folders;
+            for (const auto& entry : std::filesystem::directory_iterator(pivotsRootPath))
+                if (entry.is_directory())
+                    folders.push_back(entry.path().filename().string());
+
+            std::sort(folders.begin(), folders.end());
+            for (const auto& folder : folders)
+                redirector.addOverlay(folder);
+        }
+    }
+    
 
     /* Attach detour for gethostbyname.. */
     DetourTransactionBegin();
@@ -662,6 +737,7 @@ int __cdecl main(int argc, char* argv[])
 
     sslState::ca_chain = nullptr;
 
+    redirector.releaseHooks();
     /* Detach detour for gethostbyname. */
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());

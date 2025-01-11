@@ -41,7 +41,7 @@ add_executable(xiloader
     src/polcore.h
     ${CMAKE_CURRENT_BINARY_DIR}/src/xiloader.rc
     xiloader.manifest
-)
+ "src/XiPivot/Redirector.cpp" "src/XiPivot/Redirector.h" "src/XiPivot/MemCache.h" "src/XiPivot/MemCache.cpp" "src/XiPivot/Delegate.cpp" "src/XiPivot/Delegate.h")
 
 set_target_properties(xiloader PROPERTIES LINK_FLAGS "/LARGEADDRESSAWARE")
 
